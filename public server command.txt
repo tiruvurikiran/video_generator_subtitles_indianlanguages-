@@ -1,0 +1,4 @@
+streamlit run app.py --server.address 192.168.1.76 --server.port 8501
+
+if error comes:
+googletrans==4.0.0rc1
