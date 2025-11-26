@@ -118,7 +118,6 @@ Pygments==2.19.2
 PyMuPDF==1.26.4
 pyparsing==3.2.3
 PyPDF2==3.0.1
-pypiwin32==223
 pyreadline3==3.5.4
 pysrt==1.1.2
 pytesseract==0.3.13
@@ -185,6 +184,7 @@ wordfreq==3.1.1
 wrapt==1.17.3
 yake==0.6.0
 yarl==1.20.1
+
 
 
 
