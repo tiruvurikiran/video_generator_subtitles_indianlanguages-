@@ -1,3 +1,4 @@
+python 3.12
 acres==0.5.0
 aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
@@ -185,4 +186,5 @@ wordfreq==3.1.1
 wrapt==1.17.3
 yake==0.6.0
 yarl==1.20.1
+
 
