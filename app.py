@@ -275,33 +275,43 @@ def extract_heading(txt: str) -> str:
 
 # ─── IMAGE SEARCH & DOWNLOAD (with caching) ────────────────────────────
 @functools.lru_cache(maxsize=256)
+@functools.lru_cache(maxsize=256)
 def fetch_image_for_slide(text, prefix, idx):
-	# img_path = os.path.join(IMG_DIR, f"{tag}_slide_{idx}.jpg")
-	img_path = os.path.join(IMG_DIR, f"{prefix}_slide_{idx}.jpg")
-	if os.path.exists(img_path):
-		return img_path
-	if not UNSPLASH_ACCESS_KEY:
-		return None
+    img_path = os.path.join(IMG_DIR, f"{prefix}_slide_{idx}.jpg")
+    
+    # If image already exists, return it
+    if os.path.exists(img_path):
+        return img_path
+        
+    # If no Unsplash key, return None
+    if not UNSPLASH_ACCESS_KEY:
+        return None
 
-	query = text if len(text) < 50 else text[:50]
-	url = "https://api.unsplash.com/search/photos"
-	params = {"query": query, "per_page": 1, "orientation": "landscape"}
-	headers = {"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"}
-	try:
-		r = requests.get(url, params=params, headers=headers, timeout=5)
-		r.raise_for_status()
-		results = r.json().get("results")
-		if not results:
-			return None
-		img_url = results[0]["urls"]["regular"]
-		resp = requests.get(img_url, stream=True, timeout=5)
-		resp.raise_for_status()
-		with open(img_path, "wb") as out:
-			for chunk in resp.iter_content(1024):
-				out.write(chunk)
-		return img_path
-	except Exception:
-		return img_path if os.path.exists(img_path) else None
+    query = text if len(text) < 50 else text[:50]
+    url = "https://api.unsplash.com/search/photos"
+    params = {"query": query, "per_page": 1, "orientation": "landscape"}
+    headers = {"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"}
+    
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        results = r.json().get("results")
+        if not results:
+            return None
+            
+        img_url = results[0]["urls"]["regular"]
+        resp = requests.get(img_url, stream=True, timeout=10)
+        resp.raise_for_status()
+        
+        with open(img_path, "wb") as out:
+            for chunk in resp.iter_content(1024):
+                out.write(chunk)
+                
+        return img_path
+    except Exception as e:
+        print(f"Error fetching image: {e}")
+        # Return the path anyway - it might exist from a previous attempt
+        return img_path if os.path.exists(img_path) else None
 
 # ─── at the top of your script, after imports ────────────────────────
 VOICE_OPTIONS = {
@@ -624,85 +634,98 @@ def burn_subtitles_pil(video_path, srt_path, out_path):
 
 
 # ─── 3) GENERATE VIDEO: slides + moving subtitles ───────────────────────
-def generate_video(slides, prefix,rebuild=False):
+def generate_video(slides, prefix, rebuild=False):
+    # 1) synthesize audio
+    audio_files = synthesize_slides(slides, prefix, selected_lang, selected_tld)
+    st.session_state[f"audio_files_{prefix}"] = audio_files
 
-	# 1) synthesize audio
-	audio_files = synthesize_slides(slides, prefix,selected_lang,selected_tld)
-	st.session_state[f"audio_files_{prefix}"] = audio_files
+    common_heading = extract_heading(slides[0])
 
-	common_heading = extract_heading(slides[0])
+    # 2) fetch images with proper fallback
+    img_paths = []
+    for i in range(len(slides)):
+        found = False
+        
+        # First check for uploaded media files
+        for ext in [".mp4", ".mov", ".jpg", ".jpeg", ".png"]:
+            path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}{ext}")
+            if os.path.exists(path):
+                img_paths.append(path)
+                found = True
+                break
+        
+        # If no uploaded media, try Unsplash
+        if not found:
+            unsplash_path = fetch_image_for_slide(slides[i], prefix, i)
+            if unsplash_path and os.path.exists(unsplash_path):
+                img_paths.append(unsplash_path)
+                found = True
+        
+        # Final fallback - create a default path that won't break the code
+        if not found:
+            # Create a default image path that we can check for later
+            default_path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}_default.jpg")
+            img_paths.append(default_path)
 
-	# 2) fetch images (unchanged)
-	# Custom logic to support both images and uploaded video clips
-	img_paths = []
-	for i in range(len(slides)):
-		found = False
-		for ext in [".mp4", ".mov", ".jpg", ".jpeg", ".png"]:
-			# path = os.path.join(IMG_DIR, f"{tag}_slide_{i}{ext}")
-			path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}{ext}")
-			if os.path.exists(path):
-				img_paths.append(path)
-				found = True
-				break
-		if not found:
-			# fallback to Unsplash image
-			img_paths.append(fetch_image_for_slide(slides[i], prefix, i))
+    # 3) build slide clips with safe path handling
+    def _build(params):
+        txt, aud, img_or_vid_path = params
+        
+        # Handle None or non-existent paths
+        if img_or_vid_path is None or not os.path.exists(img_or_vid_path):
+            # Use a solid color background as fallback
+            W, H = 640, 360
+            bg = Image.new("RGB", (W, H), (30, 30, 70))  # Dark blue background
+            bg_clip = ImageClip(np.array(bg)).set_duration(AudioFileClip(aud).duration)
+        else:
+            audio = AudioFileClip(aud)
+            duration = audio.duration
+            audio.close()
+            
+            heading_short = shorten(common_heading, width=60, placeholder="…")
+            ext = os.path.splitext(img_or_vid_path)[-1].lower()
+            
+            if ext in ['.mp4', '.mov']:
+                # Use video background
+                bg_clip = VideoFileClip(img_or_vid_path).subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
+                bg_clip = bg_clip.resize((640, 360)).set_duration(duration)
+            else:
+                # Use image background
+                bg_clip = make_slide(heading_short, duration, img_or_vid_path)
 
+        clip = bg_clip.set_audio(AudioFileClip(aud))
+        return clip
 
-	# 3) build slide clips
-	def _build(params):
-		txt, aud, img_or_vid_path = params
-		audio = AudioFileClip(aud)
-		duration = audio.duration
-		# heading = extract_heading(txt)
-		heading_short = shorten(common_heading, width=60, placeholder="…")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
+        clips = list(ex.map(_build, zip(slides, audio_files, img_paths)))
 
-		ext = os.path.splitext(img_or_vid_path)[-1].lower()
-		if ext in ['.mp4', '.mov']:
-			# Use video background
-			bg_clip = VideoFileClip(img_or_vid_path).subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
-			bg_clip = bg_clip.resize((640, 360)).set_duration(duration)
-		else:
-			# Use image background as before
-			# heading_short = shorten(heading, width=60, placeholder="…")
-			bg_clip = make_slide(heading_short, duration, img_or_vid_path)
+    # 4) concatenate + write raw
+    raw = concatenate_videoclips(clips, method="compose")
+    pdf_folder = os.path.join(VIDEO_DIR, prefix)
+    os.makedirs(pdf_folder, exist_ok=True)
 
-		clip = bg_clip.set_audio(AudioFileClip(aud))
-		audio.close()
-		return clip
+    tag = f"{selected_lang}" + (f"_{selected_tld}" if selected_tld else "")
+    raw_filename    = f"{prefix}_{tag}.mp4"
+    subtitled_fname = f"{prefix}_{tag}_subtitled.mp4"
 
-
-	with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
-		clips = list(ex.map(_build, zip(slides, audio_files, img_paths)))
-
-	# 4) concatenate + write raw
-	raw = concatenate_videoclips(clips, method="compose")
-	pdf_folder = os.path.join(VIDEO_DIR, prefix)
-	os.makedirs(pdf_folder, exist_ok=True)
-
-	tag = f"{selected_lang}" + (f"_{selected_tld}" if selected_tld else "")
-	raw_filename    = f"{prefix}_{tag}.mp4"
-	subtitled_fname = f"{prefix}_{tag}_subtitled.mp4"
-
-	raw_path = os.path.join(pdf_folder, raw_filename)
-	subtitled_out = os.path.join(pdf_folder, subtitled_fname)
+    raw_path = os.path.join(pdf_folder, raw_filename)
+    subtitled_out = os.path.join(pdf_folder, subtitled_fname)
     
-    
-	# write raw
-	raw.write_videofile(raw_path, fps=24, codec="libx264", audio_codec="aac", 
-						threads=os.cpu_count(), ffmpeg_params=["-preset","ultrafast","-crf","30"], logger=None)
+    # write raw
+    raw.write_videofile(raw_path, fps=24, codec="libx264", audio_codec="aac", 
+                        threads=os.cpu_count(), ffmpeg_params=["-preset","ultrafast","-crf","30"], logger=None)
 
-	# write SRT
-	srt_path = write_srt(slides, audio_files, prefix)
+    # write SRT
+    srt_path = write_srt(slides, audio_files, prefix)
 
-	# burn moving subtitles
-	burn_subtitles_pil(raw_path, srt_path, subtitled_out)
-	try:
-		os.remove(raw_path)
-	except OSError:
-		pass
+    # burn moving subtitles
+    burn_subtitles_pil(raw_path, srt_path, subtitled_out)
+    try:
+        os.remove(raw_path)
+    except OSError:
+        pass
 
-	return subtitled_out, srt_path
+    return subtitled_out, srt_path
 
 
 def get_slide_start_times(audio_files):
@@ -898,6 +921,7 @@ if uploaded_files:
 			# and in all cases, if a video_path exists, show it:
 			if st.session_state.get(f"video_path_{prefix}"):
 				st.video(st.session_state[f"video_path_{prefix}"])
+
 
 
 
