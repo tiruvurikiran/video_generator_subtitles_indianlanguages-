@@ -275,7 +275,6 @@ def extract_heading(txt: str) -> str:
 
 # ─── IMAGE SEARCH & DOWNLOAD (with caching) ────────────────────────────
 @functools.lru_cache(maxsize=256)
-@functools.lru_cache(maxsize=256)
 def fetch_image_for_slide(text, prefix, idx):
     img_path = os.path.join(IMG_DIR, f"{prefix}_slide_{idx}.jpg")
     
@@ -634,98 +633,85 @@ def burn_subtitles_pil(video_path, srt_path, out_path):
 
 
 # ─── 3) GENERATE VIDEO: slides + moving subtitles ───────────────────────
-def generate_video(slides, prefix, rebuild=False):
-    # 1) synthesize audio
-    audio_files = synthesize_slides(slides, prefix, selected_lang, selected_tld)
-    st.session_state[f"audio_files_{prefix}"] = audio_files
+def generate_video(slides, prefix,rebuild=False):
 
-    common_heading = extract_heading(slides[0])
+	# 1) synthesize audio
+	audio_files = synthesize_slides(slides, prefix,selected_lang,selected_tld)
+	st.session_state[f"audio_files_{prefix}"] = audio_files
 
-    # 2) fetch images with proper fallback
-    img_paths = []
-    for i in range(len(slides)):
-        found = False
-        
-        # First check for uploaded media files
-        for ext in [".mp4", ".mov", ".jpg", ".jpeg", ".png"]:
-            path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}{ext}")
-            if os.path.exists(path):
-                img_paths.append(path)
-                found = True
-                break
-        
-        # If no uploaded media, try Unsplash
-        if not found:
-            unsplash_path = fetch_image_for_slide(slides[i], prefix, i)
-            if unsplash_path and os.path.exists(unsplash_path):
-                img_paths.append(unsplash_path)
-                found = True
-        
-        # Final fallback - create a default path that won't break the code
-        if not found:
-            # Create a default image path that we can check for later
-            default_path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}_default.jpg")
-            img_paths.append(default_path)
+	common_heading = extract_heading(slides[0])
 
-    # 3) build slide clips with safe path handling
-    def _build(params):
-        txt, aud, img_or_vid_path = params
-        
-        # Handle None or non-existent paths
-        if img_or_vid_path is None or not os.path.exists(img_or_vid_path):
-            # Use a solid color background as fallback
-            W, H = 640, 360
-            bg = Image.new("RGB", (W, H), (30, 30, 70))  # Dark blue background
-            bg_clip = ImageClip(np.array(bg)).set_duration(AudioFileClip(aud).duration)
-        else:
-            audio = AudioFileClip(aud)
-            duration = audio.duration
-            audio.close()
-            
-            heading_short = shorten(common_heading, width=60, placeholder="…")
-            ext = os.path.splitext(img_or_vid_path)[-1].lower()
-            
-            if ext in ['.mp4', '.mov']:
-                # Use video background
-                bg_clip = VideoFileClip(img_or_vid_path).subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
-                bg_clip = bg_clip.resize((640, 360)).set_duration(duration)
-            else:
-                # Use image background
-                bg_clip = make_slide(heading_short, duration, img_or_vid_path)
+	# 2) fetch images (unchanged)
+	# Custom logic to support both images and uploaded video clips
+	img_paths = []
+	for i in range(len(slides)):
+		found = False
+		for ext in [".mp4", ".mov", ".jpg", ".jpeg", ".png"]:
+			# path = os.path.join(IMG_DIR, f"{tag}_slide_{i}{ext}")
+			path = os.path.join(IMG_DIR, f"{prefix}_slide_{i}{ext}")
+			if os.path.exists(path):
+				img_paths.append(path)
+				found = True
+				break
+		if not found:
+			# fallback to Unsplash image
+			img_paths.append(fetch_image_for_slide(slides[i], prefix, i))
 
-        clip = bg_clip.set_audio(AudioFileClip(aud))
-        return clip
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
-        clips = list(ex.map(_build, zip(slides, audio_files, img_paths)))
+	# 3) build slide clips
+	def _build(params):
+		txt, aud, img_or_vid_path = params
+		audio = AudioFileClip(aud)
+		duration = audio.duration
+		# heading = extract_heading(txt)
+		heading_short = shorten(common_heading, width=60, placeholder="…")
 
-    # 4) concatenate + write raw
-    raw = concatenate_videoclips(clips, method="compose")
-    pdf_folder = os.path.join(VIDEO_DIR, prefix)
-    os.makedirs(pdf_folder, exist_ok=True)
+		ext = os.path.splitext(img_or_vid_path)[-1].lower()
+		if ext in ['.mp4', '.mov']:
+			# Use video background
+			bg_clip = VideoFileClip(img_or_vid_path).subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
+			bg_clip = bg_clip.resize((640, 360)).set_duration(duration)
+		else:
+			# Use image background as before
+			# heading_short = shorten(heading, width=60, placeholder="…")
+			bg_clip = make_slide(heading_short, duration, img_or_vid_path)
 
-    tag = f"{selected_lang}" + (f"_{selected_tld}" if selected_tld else "")
-    raw_filename    = f"{prefix}_{tag}.mp4"
-    subtitled_fname = f"{prefix}_{tag}_subtitled.mp4"
+		clip = bg_clip.set_audio(AudioFileClip(aud))
+		audio.close()
+		return clip
 
-    raw_path = os.path.join(pdf_folder, raw_filename)
-    subtitled_out = os.path.join(pdf_folder, subtitled_fname)
+
+	with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
+		clips = list(ex.map(_build, zip(slides, audio_files, img_paths)))
+
+	# 4) concatenate + write raw
+	raw = concatenate_videoclips(clips, method="compose")
+	pdf_folder = os.path.join(VIDEO_DIR, prefix)
+	os.makedirs(pdf_folder, exist_ok=True)
+
+	tag = f"{selected_lang}" + (f"_{selected_tld}" if selected_tld else "")
+	raw_filename    = f"{prefix}_{tag}.mp4"
+	subtitled_fname = f"{prefix}_{tag}_subtitled.mp4"
+
+	raw_path = os.path.join(pdf_folder, raw_filename)
+	subtitled_out = os.path.join(pdf_folder, subtitled_fname)
     
-    # write raw
-    raw.write_videofile(raw_path, fps=24, codec="libx264", audio_codec="aac", 
-                        threads=os.cpu_count(), ffmpeg_params=["-preset","ultrafast","-crf","30"], logger=None)
+    
+	# write raw
+	raw.write_videofile(raw_path, fps=24, codec="libx264", audio_codec="aac", 
+						threads=os.cpu_count(), ffmpeg_params=["-preset","ultrafast","-crf","30"], logger=None)
 
-    # write SRT
-    srt_path = write_srt(slides, audio_files, prefix)
+	# write SRT
+	srt_path = write_srt(slides, audio_files, prefix)
 
-    # burn moving subtitles
-    burn_subtitles_pil(raw_path, srt_path, subtitled_out)
-    try:
-        os.remove(raw_path)
-    except OSError:
-        pass
+	# burn moving subtitles
+	burn_subtitles_pil(raw_path, srt_path, subtitled_out)
+	try:
+		os.remove(raw_path)
+	except OSError:
+		pass
 
-    return subtitled_out, srt_path
+	return subtitled_out, srt_path
 
 
 def get_slide_start_times(audio_files):
@@ -921,6 +907,7 @@ if uploaded_files:
 			# and in all cases, if a video_path exists, show it:
 			if st.session_state.get(f"video_path_{prefix}"):
 				st.video(st.session_state[f"video_path_{prefix}"])
+
 
 
 
