@@ -690,28 +690,28 @@ def generate_video(slides, prefix,rebuild=False):
 	# 	audio.close()
 	# 	return clip
 	def _build(params):
-    txt, aud, img_or_vid_path = params
-
-    audio = AudioFileClip(aud)
-    duration = audio.duration
-
-    # ✅ HARD GUARANTEE: always produce a background
-    if not img_or_vid_path or not os.path.exists(img_or_vid_path):
-        bg_clip = make_slide(txt, duration)
-    else:
-        ext = os.path.splitext(img_or_vid_path)[-1].lower()
-
-        if ext in [".mp4", ".mov"]:
-            bg_clip = (
-                VideoFileClip(img_or_vid_path)
-                .subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
-                .resize((640, 360))
-                .set_duration(duration)
-            )
-        else:
-            bg_clip = make_slide(txt, duration, img_or_vid_path)
-
-    return bg_clip.set_audio(audio)
+	    txt, aud, img_or_vid_path = params
+	
+	    audio = AudioFileClip(aud)
+	    duration = audio.duration
+	
+	    # ✅ HARD GUARANTEE: always produce a background
+	    if not img_or_vid_path or not os.path.exists(img_or_vid_path):
+	        bg_clip = make_slide(txt, duration)
+	    else:
+	        ext = os.path.splitext(img_or_vid_path)[-1].lower()
+	
+	        if ext in [".mp4", ".mov"]:
+	            bg_clip = (
+	                VideoFileClip(img_or_vid_path)
+	                .subclip(0, min(duration, VideoFileClip(img_or_vid_path).duration))
+	                .resize((640, 360))
+	                .set_duration(duration)
+	            )
+	        else:
+	            bg_clip = make_slide(txt, duration, img_or_vid_path)
+	
+	    return bg_clip.set_audio(audio)
 
 
 
@@ -941,6 +941,7 @@ if uploaded_files:
 			# and in all cases, if a video_path exists, show it:
 			if st.session_state.get(f"video_path_{prefix}"):
 				st.video(st.session_state[f"video_path_{prefix}"])
+
 
 
 
