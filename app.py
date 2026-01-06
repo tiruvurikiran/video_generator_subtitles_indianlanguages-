@@ -439,13 +439,17 @@ def synthesize_slides(slides, prefix, lang, tld):
 		if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
 			to_say.append((txt, out_path))
 
+	# for txt, out_path in to_say:
+ #    synthesize_slide_gtts(txt, out_path, lang, tld)
 	for txt, out_path in to_say:
-    try:
-        synthesize_slide_gtts(txt, out_path, lang, tld)
-        time.sleep(1.2)  # ⬅️ CRITICAL on Render
-    except Exception as e:
-        print(f"TTS failed for slide: {e}")
-        raise
+	    try:
+	        synthesize_slide_gtts(txt, out_path, lang, tld)
+	        time.sleep(1.2)  # ⬅️ CRITICAL on Render
+	    except Exception as e:
+	        print(f"TTS failed for slide: {e}")
+	        raise
+
+
 
 
 	return files
