@@ -691,7 +691,6 @@ def generate_video(slides, prefix,rebuild=False):
 	# 	return clip
 	def _build(params):
 	    txt, aud, img_or_vid_path = params
-	
 	    audio = AudioFileClip(aud)
 	    duration = audio.duration
 	
@@ -941,6 +940,7 @@ if uploaded_files:
 			# and in all cases, if a video_path exists, show it:
 			if st.session_state.get(f"video_path_{prefix}"):
 				st.video(st.session_state[f"video_path_{prefix}"])
+
 
 
 
