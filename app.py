@@ -440,7 +440,13 @@ def synthesize_slides(slides, prefix, lang, tld):
 			to_say.append((txt, out_path))
 
 	for txt, out_path in to_say:
-		synthesize_slide_gtts(txt, out_path, lang, tld)
+    try:
+        synthesize_slide_gtts(txt, out_path, lang, tld)
+        time.sleep(1.2)  # ⬅️ CRITICAL on Render
+    except Exception as e:
+        print(f"TTS failed for slide: {e}")
+        raise
+
 
 	return files
 
@@ -907,6 +913,7 @@ if uploaded_files:
 			# and in all cases, if a video_path exists, show it:
 			if st.session_state.get(f"video_path_{prefix}"):
 				st.video(st.session_state[f"video_path_{prefix}"])
+
 
 
 
